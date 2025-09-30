@@ -64,6 +64,114 @@
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
+
+(function() {
+  const THRESHOLD = 160; // heuristic for docked devtools
+  let devtoolsOpen = false;
+  let notified = false;
+
+  function createOverlay() {
+    if (document.getElementById('anti-inspect-overlay')) return;
+    const o = document.createElement('div');
+    o.id = 'anti-inspect-overlay';
+    Object.assign(o.style, {
+      position: 'fixed',
+      inset: '0',
+      background: 'rgba(0,0,0,0.97)',
+      color: '#fff',
+      zIndex: 2147483647,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      textAlign: 'center',
+      padding: '20px',
+      fontFamily: 'system-ui, Arial, sans-serif',
+      fontSize: '18px'
+    });
+    o.innerHTML = '<div style="max-width:720px"><strong>⚠️ Developer tools detected</strong><br>Your access to this content is blocked for security reasons.</div>';
+    document.body.appendChild(o);
+    // prevent interaction with the page behind the overlay
+    document.body.style.pointerEvents = 'none';
+    o.style.pointerEvents = 'auto';
+    // try to prevent selection & right-click on overlay
+    o.addEventListener('contextmenu', e => e.preventDefault());
+  }
+
+  function removeOverlay() {
+    const el = document.getElementById('anti-inspect-overlay');
+    if (el) el.remove();
+    document.body.style.pointerEvents = '';
+  }
+
+  function handleOpen() {
+    if (devtoolsOpen) return;
+    devtoolsOpen = true;
+    createOverlay();
+    // optional: you could send a beacon/fetch to server here
+    // if (!notified) { navigator.sendBeacon('/devtools_detected', JSON.stringify({ ts: Date.now() })); notified = true; }
+  }
+  function handleClose() {
+    if (!devtoolsOpen) return;
+    devtoolsOpen = false;
+    removeOverlay();
+  }
+
+  // 1) Resize heuristic (works when devtools are docked)
+  setInterval(function() {
+    try {
+      const opened = (window.outerWidth - window.innerWidth > THRESHOLD) ||
+                     (window.outerHeight - window.innerHeight > THRESHOLD);
+      if (opened) handleOpen(); else handleClose();
+    } catch (e) { /* ignore */ }
+  }, 500);
+
+  // 2) Debugger timing heuristic (pauses/time-slow if devtools open)
+  (function cycDebug() {
+    const start = Date.now();
+    // this statement may pause when devtools with "pause on exceptions" or debugger is active
+    debugger;
+    const dt = Date.now() - start;
+    if (dt > 100) handleOpen();
+    setTimeout(cycDebug, 3000);
+  })();
+
+  // 3) Console getter trick (fires when object is inspected in console)
+  try {
+    const detector = {};
+    Object.defineProperty(detector, 'toString', {
+      configurable: true,
+      get: function() { handleOpen(); return function(){}; }
+    });
+    // harmless console.log that may trigger getter if console open/inspected
+    console.log('%c', detector);
+  } catch (e) { /* ignore */ }
+
+  // 4) Block common shortcuts and right-click (deterrent)
+  document.addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('keydown', function(e) {
+    // F12, Ctrl+Shift+I/J, Ctrl+U
+    if (e.keyCode === 123 || // F12
+       (e.ctrlKey && e.shiftKey && (e.keyCode === 73 || e.keyCode === 74)) || // Ctrl+Shift+I/J
+       (e.ctrlKey && e.keyCode === 85) // Ctrl+U
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    // try to block ESC (27) and other keys if you want (use carefully)
+  }, true);
+
+  // extra: small protection for detached devtools — check for console open by measuring width/height change on window
+  window.addEventListener('resize', function() {
+    const opened = (window.outerWidth - window.innerWidth > THRESHOLD) ||
+                   (window.outerHeight - window.innerHeight > THRESHOLD);
+    if (opened) handleOpen(); else handleClose();
+  });
+
+  // cleanup when page is hidden (optional)
+  document.addEventListener('visibilitychange', function() {
+    if (document.hidden) { /* you could clear timers here if desired */ }
+  });
+})();
     /*
     ************************************************************
     🚫 WARNING 🚫
